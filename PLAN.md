@@ -1,10 +1,12 @@
-# Food Logger — Implementation Plan (v3.1: Railway + Neon)
+# Food Logger — Implementation Plan (v3.2: Railway + Neon)
 
 A self-hosted food logging app to replace MacroFactor's logging + readouts. Personal use (me, spouse later). I control the data, the matching logic, and the dashboards.
 
 **Changes from v2** (planning session, July 2026): identity column from day one (single user in v1); bulk FDC import instead of lazy-only; barcode scanning de-risked in Phase 0; iOS-correct offline queue (IndexedDB outbox, not Background Sync); client-supplied log dates; local-only search-as-you-type; explicit migrate command; defined coverage formula; new dashboard-integration phase (dashboard reads `food_log` rollups); MCP split into stdio-first then remote OAuth.
 
 **Changes in v3.1:** identity is a `users` table + `user_id` FK from day one (not a free-text column); token→user resolution isolated in a single swappable `get_current_user` dependency; added the "Scaling to a few users" appendix (future work, deliberately not v1).
+
+**Changes in v3.2** (final pre-build Q&A): NO meal concept — a day is one chronological list (meal column dropped); sodium is a first-class daily target (hypertension is the whole point); AI plate estimation promoted from nice-to-have to its own Phase 5 — it is how I log plated meals in MacroFactor today; manual entry is portion-picker-first with grams one tap behind; no MacroFactor history import — starting fresh.
 
 ## Context for Claude Code
 
@@ -31,7 +33,10 @@ A self-hosted food logging app to replace MacroFactor's logging + readouts. Pers
 3. **Search-as-you-type is local-only.** Keystroke queries hit Postgres FTS/trigram exclusively. Live FDC search is an explicit user action ("Search USDA →"), debounced, importing hits on the fly. This keeps us far from FDC's ~1,000 req/hr limit.
 4. **Coverage formula (pin with tests):** for nutrient *k* over a period, `coverage = grams logged from foods reporting k ÷ total grams logged`. Displayed alongside every micronutrient total so a low number is distinguishable from unlogged data.
 5. **Offline queue is an IndexedDB outbox.** iOS WebKit does not support the Background Sync API. Failed log POSTs queue in IndexedDB and retry on app open / foreground / manual refresh. Service worker caches the app shell only.
-6. **Dashboard integration direction (decided):** my existing health dashboard will *read* daily rollups from the `food_log` schema (view or API — chosen in Phase 6). The logger never writes outside its own schema. Until cutover, MacroFactor keeps feeding the dashboard; avoid double-counting by not wiring the dashboard to `food_log` until MacroFactor logging stops.
+6. **Dashboard integration direction (decided):** my existing health dashboard will *read* daily rollups from the `food_log` schema (view or API — chosen in Phase 7). The logger never writes outside its own schema. Until cutover, MacroFactor keeps feeding the dashboard; avoid double-counting by not wiring the dashboard to `food_log` until MacroFactor logging stops.
+7. **No meal concept.** A day is a single chronological list of entries — no breakfast/lunch/dinner/snack column, grouping, or picker anywhere (schema, API, UI). Fewer taps per log; `logged_at` preserves ordering.
+8. **Sodium is a first-class target.** `sodium_mg` sits in the targets table and the daily rollup at the same tier as protein, with a prominent running total / remaining in Day view. Always show its coverage figure — branded foods report sodium inconsistently, and an understated sodium number is worse than none (hypertension management is the reason this app exists).
+9. **Starting fresh — no MacroFactor history import.** Trends build from the first logged day. Consequence: TDEE estimation (Phase 7) has no data until weeks of logging accumulate; its charts must show honest "still collecting (n=X days)" states rather than confident numbers from thin data.
 
 ## Repository layout
 
@@ -57,9 +62,9 @@ All tables in schema `food_log`.
 - **foods** — id, source (`fdc_foundation` | `fdc_sr_legacy` | `fdc_branded` | `off` | `custom`), source_id, name, brand, barcode (nullable, indexed), search_vec (tsvector, GIN), source_payload JSONB (raw upstream response), created/updated timestamps. Unique on (source, source_id).
 - **portions** — id, food_id FK, description ("1 cup", "1 slice"), gram_weight. Raw grams is always available as an implicit portion.
 - **nutrients** — food_id FK, nutrient_key (snake_case, e.g. `magnesium_mg`), amount_per_100g. PK (food_id, nutrient_key). Import EVERY nutrient the source reports.
-- **log_entries** — id, user_id FK, date (client-local), meal (`breakfast`|`lunch`|`dinner`|`snack`), food_id FK, grams (canonical), portion_id + portion_qty (nullable, for display/re-edit), logged_at timestamptz, client_id (UUID from the PWA for idempotent retry from the outbox).
+- **log_entries** — id, user_id FK, date (client-local), food_id FK, grams (canonical), portion_id + portion_qty (nullable, for display/re-edit), logged_at timestamptz, client_id (UUID from the PWA for idempotent retry from the outbox), entry_method (`manual`|`barcode`|`ai_estimate`|`mcp` — lets us audit AI-estimated entries later). No meal column (decision 7).
 - **body_weight** — id, user_id FK, date, weight_lb, logged_at. Unique (user_id, date).
-- **targets** — user_id FK, effective_date, kcal, protein_g, carbs_g, fat_g, fiber_g (+ optional sodium_mg). PK (user_id, effective_date); current target = latest effective_date ≤ today.
+- **targets** — user_id FK, effective_date, kcal, protein_g, carbs_g, fat_g, fiber_g, sodium_mg (first-class, decision 8). PK (user_id, effective_date); current target = latest effective_date ≤ today.
 - **schema_migrations** — filename, applied_at.
 
 Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keyed on a natural key — foods on (source, source_id), log POSTs on client_id — so imports and outbox retries are always safe to replay.
@@ -90,8 +95,8 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 - **Done when:** "greek yogurt" returns sane ranked results fast from the bulk-imported set; "yogrt" still finds yogurt; an unknown barcode gets fetched, cached, and returned; remote search only fires when asked.
 
 ### Phase 3 — Logging API
-- `POST /log` (client_id, user implied by token via `get_current_user`, client-local date, meal, food_id, grams OR portion_id+qty — server converts to canonical grams; idempotent on client_id), `GET /log/{date}`, `PATCH /log/{id}`, `DELETE /log/{id}`.
-- `GET /summary/{date}` and `GET /summary?start=&end=` → daily macro rollups (kcal, protein, carbs, fat, fiber).
+- `POST /log` (client_id, user implied by token via `get_current_user`, client-local date, food_id, grams OR portion_id+qty — server converts to canonical grams; idempotent on client_id), `GET /log/{date}`, `PATCH /log/{id}`, `DELETE /log/{id}`.
+- `GET /summary/{date}` and `GET /summary?start=&end=` → daily rollups (kcal, protein, carbs, fat, fiber, **sodium_mg with its coverage figure** — sodium is target-tier, decision 8).
 - `GET /summary/nutrient/{key}?start=&end=` → daily totals for any nutrient key **plus the coverage figure** (formula above).
 - `POST /weight`, `GET /weight?start=&end=` — lbs in, lbs out.
 - `GET/PUT /targets` — versioned by effective_date.
@@ -100,30 +105,39 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 ### Phase 4 — PWA frontend (logging-first, thumb-friendly)
 This is the whole reason the project exists — MacroFactor's readout is bad; mine must be fast and legible.
 - **First-run screen:** paste API token once; stored locally.
-- **Log screen (default): recents-first.** The primary interaction is the recent-foods list (tap to re-log with last portion) — that, not search, is what wins the 15-second goal. Then: big search box (as-you-type = local only), barcode scan button (per Phase 0 spike findings), explicit "Search USDA →" escalation. Selecting a food shows portion picker (portions from DB + raw grams) with live macro preview.
-- **Day view:** entries grouped by meal, running totals vs. targets, remaining macros prominent.
+- **Log screen (default): recents-first.** The primary interaction is the recent-foods list (tap to re-log with last portion) — that, not search, is what wins the 15-second goal. Then: big search box (as-you-type = local only), barcode scan button (per Phase 0 spike findings), explicit "Search USDA →" escalation. (An "estimate my plate" entry point is added here by Phase 5.)
+- **Amount entry: portion-picker-first, grams one tap behind** (my MacroFactor habit). Selecting a food leads with its portions ("1 cup", "1 container"); a visible toggle switches to raw-gram entry. Live macro + sodium preview either way.
+- **Day view:** single chronological list (no meal grouping, decision 7); running totals vs. targets with remaining kcal/protein/**sodium** prominent.
 - **Trends view:** 7/30-day kcal + protein charts; weight trend (lbs) with 7-day smoothing overlay; a micronutrient panel (pick a nutrient → daily bars with coverage shading).
 - PWA requirements: manifest + icons, service worker caching the shell, **IndexedDB outbox** for failed log POSTs (retry on open/foreground — no Background Sync on iOS), installable from Chrome on iOS.
 - **Done when:** I can log breakfast from my home screen in under 15 seconds including a barcode scan, and a log made in airplane mode lands once I'm back online.
 
-### Phase 5 — MCP server (stdio first)
-- `mcp/` exposes: search_foods, log_food, get_day_summary, get_trends, get_nutrient_summary, log_weight — thin wrappers over the API using the bearer token.
-- **5a: stdio mode** for Claude Code — trivial, ship first.
-- **5b: remote hosting** alongside the Railway service for claude.ai. Note: claude.ai custom connectors authenticate via OAuth, not static bearer headers — scope the OAuth wrapper as its own step (mirroring what I explored for Hevy/MacroFactor), don't let it block 5a.
-- **Done when:** Claude can log a meal and pull a weekly summary through MCP from Claude Code (5a); remote (5b) tracked separately.
+### Phase 5 — AI plate estimation (core, not a nice-to-have — this is how I log plated meals today)
+- `POST /log/estimate`: free-text plate description ("chicken breast about palm size, a cup of rice, broccoli") → Claude API call → structured candidate entries: each matched to a **local DB food** (FTS over the bulk-imported set; never invented nutrition data) with an estimated gram amount and the model's reasoning ("palm-size chicken ≈ 120g").
+- **Confirm-before-save UX, always.** The PWA shows the candidate list with per-item portion/gram adjusters and live totals; nothing writes to `log_entries` until I confirm. Saved entries carry `entry_method='ai_estimate'`.
+- Unmatched items fall back to the explicit remote-search flow rather than silently guessing; the response marks low-confidence estimates so the UI can flag them.
+- Server-side only (`ANTHROPIC_API_KEY` in Railway env — add to `.env.example`); use a fast model (Haiku-class) — this runs at mealtimes and must feel instant.
+- **Done when:** describing a real dinner produces sensible matched foods + gram estimates I can adjust and confirm in less time than manual entry would take; estimation failures degrade gracefully to manual search.
 
-### Phase 6 — Dashboard cutover + nice-to-haves (only after 0–5 are solid)
+### Phase 6 — MCP server (stdio first)
+- `mcp/` exposes: search_foods, log_food, estimate_plate, get_day_summary, get_trends, get_nutrient_summary, log_weight — thin wrappers over the API using the bearer token.
+- **6a: stdio mode** for Claude Code — trivial, ship first.
+- **6b: remote hosting** alongside the Railway service for claude.ai. Note: claude.ai custom connectors authenticate via OAuth, not static bearer headers — scope the OAuth wrapper as its own step (mirroring what I explored for Hevy/MacroFactor), don't let it block 6a.
+- **Done when:** Claude can log a meal and pull a weekly summary through MCP from Claude Code (6a); remote (6b) tracked separately.
+
+### Phase 7 — Dashboard cutover + nice-to-haves (only after 0–6 are solid)
 - **Dashboard integration (decided direction, do first):** my health dashboard reads daily rollups from `food_log` — either a read-only SQL view (`food_log.daily_summary`) it queries directly, or its server calls `GET /summary`. The dashboard's `nutrition_days`/HAE-webhook path is retired at the same moment MacroFactor logging stops — never both live, to avoid double-counting. (The dashboard-side change happens in the Claudeai repo, referencing this contract.)
 - Apple Health ingestion: body weight flows into `food_log.body_weight` from the existing Neon health-import pipeline rather than a parallel path.
-- Natural-language logging endpoint: free text → Claude API → structured entries against local DB (confirm-before-save UX).
-- Meal templates ("my usual breakfast") — cheap win on the 15-second goal.
+- Saved combos ("my usual breakfast" — one tap logs several foods) — cheap win on the 15-second goal.
 - Recipes table: composite foods built from `foods` rows.
-- TDEE estimation: weight-trend smoothing + intake regression (design doc first, don't freestyle the math).
+- Photo input for Phase 5's plate estimation (vision call instead of text description).
+- TDEE estimation: weight-trend smoothing + intake regression (design doc first, don't freestyle the math). Note decision 9: starting fresh means this has nothing to compute for the first several weeks — show "still collecting (n=X days)", never a confident number from thin data.
 
 ## Non-goals (v1)
 - User accounts / OAuth for the app itself (static bearer token is the perimeter; the `users` table and `user_id` columns are future-proofing, not a user system).
 - Spouse onboarding (second token + user row) — schema-ready, not built.
 - Micronutrient completeness guarantees — the coverage metric exists to make gaps visible, not to fix them.
+- MacroFactor history import — starting fresh (decision 9).
 - App Store anything; offline-first sync beyond the outbox retry.
 
 ## Working agreements
@@ -140,6 +154,6 @@ Captured July 2026 so the upgrade path is designed, not improvised. "A few users
 2. **User scoping becomes a security boundary, not just attribution.** Every query on log_entries / summaries / body_weight / targets / recents must filter by the authenticated user, enforced in ONE place (query-layer guard or Postgres RLS), with tests asserting user A cannot read user B's rows. One forgotten WHERE clause = someone else's weight history. This is health-adjacent data; isolation is the feature.
 3. **Custom foods get ownership + visibility.** `POST /foods` entries become private-by-default (`created_by`, `visibility: private|shared`) so one person's "Mom's casserole" doesn't pollute everyone's search. Catalog foods (FDC/OFF) stay global.
 4. **Move off the shared Neon instance.** With outsiders' data in play, the logger gets its own Neon database — the blast radius of a bad migration must not include my personal health-import data. Decided early, it's a one-line DATABASE_URL change.
-5. **Operational hygiene becomes non-optional.** Rate limiting on auth endpoints, token revocation, error tracking (e.g. Sentry), real backups. Per-user tokens flow through to MCP: each person's Claude connects with their own credential (folds into Phase 5b's OAuth work).
+5. **Operational hygiene becomes non-optional.** Rate limiting on auth endpoints, token revocation, error tracking (e.g. Sentry), real backups. Per-user tokens flow through to MCP: each person's Claude connects with their own credential (folds into Phase 6b's OAuth work). AI plate estimation also needs a per-user rate cap once outsiders can trigger Anthropic API spend.
 
 Rough size: about one full phase of work. v1 deliberately pre-pays only the cheap parts (users table, user_id FKs, the `get_current_user` seam); everything else waits until there's a real second household asking.
