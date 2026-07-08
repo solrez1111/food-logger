@@ -1,8 +1,10 @@
-# Food Logger — Implementation Plan (v3: Railway + Neon)
+# Food Logger — Implementation Plan (v3.1: Railway + Neon)
 
 A self-hosted food logging app to replace MacroFactor's logging + readouts. Personal use (me, spouse later). I control the data, the matching logic, and the dashboards.
 
 **Changes from v2** (planning session, July 2026): identity column from day one (single user in v1); bulk FDC import instead of lazy-only; barcode scanning de-risked in Phase 0; iOS-correct offline queue (IndexedDB outbox, not Background Sync); client-supplied log dates; local-only search-as-you-type; explicit migrate command; defined coverage formula; new dashboard-integration phase (dashboard reads `food_log` rollups); MCP split into stdio-first then remote OAuth.
+
+**Changes in v3.1:** identity is a `users` table + `user_id` FK from day one (not a free-text column); token→user resolution isolated in a single swappable `get_current_user` dependency; added the "Scaling to a few users" appendix (future work, deliberately not v1).
 
 ## Context for Claude Code
 
@@ -16,7 +18,7 @@ A self-hosted food logging app to replace MacroFactor's logging + readouts. Pers
 ## Tech stack (decided — don't relitigate)
 
 - **Backend:** Python 3.12, FastAPI, `asyncpg` or `psycopg3` against Neon. No heavy ORM; plain SQL or a thin query layer.
-- **Auth:** Single static bearer token from env (`API_TOKEN`), required on every endpoint except `/health`. The PWA stores it after a one-time entry screen. Token maps server-side to an identity (see Identity below).
+- **Auth:** Single static bearer token from env (`API_TOKEN`), required on every endpoint except `/health`. The PWA stores it after a one-time entry screen. All token→user resolution lives in ONE FastAPI dependency (`get_current_user`) that every router uses — in v1 it just checks the static token and returns user 1, but it is the single seam where real multi-user auth would slot in later (see appendix). No route reads the token directly.
 - **Frontend:** Single-page PWA, Vite build, Preact/React fine. `@zxing/browser` or `html5-qrcode` for barcode scanning (winner chosen by the Phase 0 spike).
 - **Food data:** USDA FoodData Central (bulk CSV import + API), Open Food Facts (barcode fallback). Keys/secrets in Railway env vars; `.env.example` in repo.
 - **Search:** Postgres full-text (`search_vec` GIN index) with `pg_trgm` trigram fallback for typos.
@@ -24,7 +26,7 @@ A self-hosted food logging app to replace MacroFactor's logging + readouts. Pers
 
 ## Cross-cutting design decisions (settled in planning — bake into schema + code)
 
-1. **Identity from day one, single user in v1.** Every `log_entries`, `body_weight`, and `targets` row carries `logged_by TEXT NOT NULL` (default `'carlos'`). v1 ships one token → one identity; adding my spouse later is a second token + identity mapping, zero data migration. No per-user UI in v1.
+1. **Identity from day one, single user in v1.** A real `users` table exists from migration 0001, seeded with one row (me). Every `log_entries`, `body_weight`, and `targets` row carries `user_id NOT NULL REFERENCES users(id)`. v1 ships one token → user 1 via `get_current_user`; adding my spouse later is a new user row + second token, zero data migration. No per-user UI in v1.
 2. **Date attribution is client-owned.** The PWA sends the local calendar date with every log/weight entry; the server stores it verbatim (plus a UTC `logged_at` timestamp for audit). An 11pm snack lands on today, never tomorrow. No server-side UTC date derivation anywhere.
 3. **Search-as-you-type is local-only.** Keystroke queries hit Postgres FTS/trigram exclusively. Live FDC search is an explicit user action ("Search USDA →"), debounced, importing hits on the fly. This keeps us far from FDC's ~1,000 req/hr limit.
 4. **Coverage formula (pin with tests):** for nutrient *k* over a period, `coverage = grams logged from foods reporting k ÷ total grams logged`. Displayed alongside every micronutrient total so a low number is distinguishable from unlogged data.
@@ -51,12 +53,13 @@ food-logger/
 
 All tables in schema `food_log`.
 
+- **users** — id, name, created_at. Seeded with row 1 (me) in migration 0001. No credentials stored in v1 (the static token maps to user 1 in code); columns for auth arrive only if the appendix work ever happens.
 - **foods** — id, source (`fdc_foundation` | `fdc_sr_legacy` | `fdc_branded` | `off` | `custom`), source_id, name, brand, barcode (nullable, indexed), search_vec (tsvector, GIN), source_payload JSONB (raw upstream response), created/updated timestamps. Unique on (source, source_id).
 - **portions** — id, food_id FK, description ("1 cup", "1 slice"), gram_weight. Raw grams is always available as an implicit portion.
 - **nutrients** — food_id FK, nutrient_key (snake_case, e.g. `magnesium_mg`), amount_per_100g. PK (food_id, nutrient_key). Import EVERY nutrient the source reports.
-- **log_entries** — id, logged_by, date (client-local), meal (`breakfast`|`lunch`|`dinner`|`snack`), food_id FK, grams (canonical), portion_id + portion_qty (nullable, for display/re-edit), logged_at timestamptz, client_id (UUID from the PWA for idempotent retry from the outbox).
-- **body_weight** — id, logged_by, date, weight_lb, logged_at. Unique (logged_by, date).
-- **targets** — logged_by, effective_date, kcal, protein_g, carbs_g, fat_g, fiber_g (+ optional sodium_mg). PK (logged_by, effective_date); current target = latest effective_date ≤ today.
+- **log_entries** — id, user_id FK, date (client-local), meal (`breakfast`|`lunch`|`dinner`|`snack`), food_id FK, grams (canonical), portion_id + portion_qty (nullable, for display/re-edit), logged_at timestamptz, client_id (UUID from the PWA for idempotent retry from the outbox).
+- **body_weight** — id, user_id FK, date, weight_lb, logged_at. Unique (user_id, date).
+- **targets** — user_id FK, effective_date, kcal, protein_g, carbs_g, fat_g, fiber_g (+ optional sodium_mg). PK (user_id, effective_date); current target = latest effective_date ≤ today.
 - **schema_migrations** — filename, applied_at.
 
 Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keyed on a natural key — foods on (source, source_id), log POSTs on client_id — so imports and outbox retries are always safe to replay.
@@ -87,7 +90,7 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 - **Done when:** "greek yogurt" returns sane ranked results fast from the bulk-imported set; "yogrt" still finds yogurt; an unknown barcode gets fetched, cached, and returned; remote search only fires when asked.
 
 ### Phase 3 — Logging API
-- `POST /log` (client_id, logged_by-implied-by-token, client-local date, meal, food_id, grams OR portion_id+qty — server converts to canonical grams; idempotent on client_id), `GET /log/{date}`, `PATCH /log/{id}`, `DELETE /log/{id}`.
+- `POST /log` (client_id, user implied by token via `get_current_user`, client-local date, meal, food_id, grams OR portion_id+qty — server converts to canonical grams; idempotent on client_id), `GET /log/{date}`, `PATCH /log/{id}`, `DELETE /log/{id}`.
 - `GET /summary/{date}` and `GET /summary?start=&end=` → daily macro rollups (kcal, protein, carbs, fat, fiber).
 - `GET /summary/nutrient/{key}?start=&end=` → daily totals for any nutrient key **plus the coverage figure** (formula above).
 - `POST /weight`, `GET /weight?start=&end=` — lbs in, lbs out.
@@ -118,8 +121,8 @@ This is the whole reason the project exists — MacroFactor's readout is bad; mi
 - TDEE estimation: weight-trend smoothing + intake regression (design doc first, don't freestyle the math).
 
 ## Non-goals (v1)
-- User accounts / OAuth for the app itself (static bearer token is the perimeter; identity column is future-proofing, not a user system).
-- Spouse onboarding (second token + identity) — schema-ready, not built.
+- User accounts / OAuth for the app itself (static bearer token is the perimeter; the `users` table and `user_id` columns are future-proofing, not a user system).
+- Spouse onboarding (second token + user row) — schema-ready, not built.
 - Micronutrient completeness guarantees — the coverage metric exists to make gaps visible, not to fix them.
 - App Store anything; offline-first sync beyond the outbox retry.
 
@@ -128,3 +131,15 @@ This is the whole reason the project exists — MacroFactor's readout is bad; mi
 - Ask before adding dependencies beyond the stack above.
 - Never run destructive SQL against Neon schemas other than `food_log`.
 - iOS WebKit is the reference browser for every frontend claim — "works in Chrome desktop" proves nothing here.
+
+## Appendix: scaling to a few users (future — do NOT build in v1)
+
+Captured July 2026 so the upgrade path is designed, not improvised. "A few users" means ~3–20 trusted people (friends/family), not a public product. The stack itself already scales to that: one FastAPI instance + Postgres handles dozens of users; the food catalog, bulk import, and rollup math are user-count-independent. The work is entirely auth, isolation, and hygiene:
+
+1. **Real login replaces static tokens.** Static bearer tokens have no self-service onboarding and no revocation short of a redeploy. Replace with email magic links (least effort — no stored passwords) or passkeys (nicest on iOS). Adds a `sessions`/`api_tokens` table and credential columns on `users`. Because v1 isolates all auth in `get_current_user`, this replaces one function, not every router.
+2. **User scoping becomes a security boundary, not just attribution.** Every query on log_entries / summaries / body_weight / targets / recents must filter by the authenticated user, enforced in ONE place (query-layer guard or Postgres RLS), with tests asserting user A cannot read user B's rows. One forgotten WHERE clause = someone else's weight history. This is health-adjacent data; isolation is the feature.
+3. **Custom foods get ownership + visibility.** `POST /foods` entries become private-by-default (`created_by`, `visibility: private|shared`) so one person's "Mom's casserole" doesn't pollute everyone's search. Catalog foods (FDC/OFF) stay global.
+4. **Move off the shared Neon instance.** With outsiders' data in play, the logger gets its own Neon database — the blast radius of a bad migration must not include my personal health-import data. Decided early, it's a one-line DATABASE_URL change.
+5. **Operational hygiene becomes non-optional.** Rate limiting on auth endpoints, token revocation, error tracking (e.g. Sentry), real backups. Per-user tokens flow through to MCP: each person's Claude connects with their own credential (folds into Phase 5b's OAuth work).
+
+Rough size: about one full phase of work. v1 deliberately pre-pays only the cheap parts (users table, user_id FKs, the `get_current_user` seam); everything else waits until there's a real second household asking.
