@@ -1,0 +1,2 @@
+# Root shim so Nixpacks detects a Python app; real dependencies live in backend/.
+-r backend/requirements.txt

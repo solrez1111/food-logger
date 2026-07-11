@@ -92,7 +92,7 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 - **Done when:** bulk import populates ~15k foods with correct per-100g rows; one command with a barcode or search term produces correct rows. Unit tests cover nutrient normalization edge cases (kJ→kcal, serving-basis vs 100g-basis, label rounding).
 
 ### Phase 2 — Search & matching API
-- `GET /foods/search?q=` → local FTS ranked by `ts_rank`, trigram fallback when FTS returns nothing. **No implicit live-FDC fallthrough** — response includes a flag the UI uses to offer explicit "Search USDA →" (`GET /foods/search?q=&remote=1`), which imports hits on the fly.
+- `GET /foods/search?q=` → local FTS ranked by `ts_rank`, trigram fallback when FTS returns nothing. (Verified on PG16 in Phase 0: rank the fallback by `word_similarity(q, name)` with a ~0.4 cutoff — the `<%` operator's default 0.6 threshold misses obvious typos: 'yogrt' vs 'Greek Yogurt Plain' scores 0.5.) **No implicit live-FDC fallthrough** — response includes a flag the UI uses to offer explicit "Search USDA →" (`GET /foods/search?q=&remote=1`), which imports hits on the fly.
 - `GET /foods/barcode/{code}` → resolution chain from Phase 1.
 - `GET /foods/{id}` → food + portions + nutrients.
 - `POST /foods` → custom food creation.

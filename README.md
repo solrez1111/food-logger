@@ -3,7 +3,7 @@
 Self-hosted food logging app replacing MacroFactor's logging and readouts. Personal use.
 
 - **Backend:** Python 3.12 + FastAPI, plain SQL against Neon Postgres (dedicated `food_log` schema)
-- **Frontend:** installable PWA (Vite), used in Chrome on iOS — barcode scan, recents-first logging
+- **Frontend:** installable PWA (Vite), used in Chrome on iOS — photo-first AI plate estimation, barcode scan, one-tap favorites
 - **Food data:** USDA FoodData Central (bulk import + API), Open Food Facts barcode fallback
 - **Deploy:** Railway; API secured by static bearer token, `/health` public
 - **MCP:** server exposing search/log/summary tools to Claude
@@ -12,11 +12,34 @@ Self-hosted food logging app replacing MacroFactor's logging and readouts. Perso
 
 ## Status
 
-Phase 0 not started. Nothing is built yet.
+Phase 0 built (scaffold, schema, migrate, auth perimeter, barcode spike page). Remaining Phase 0 "done when" items are operator steps: Railway deploy + the on-phone barcode spike test (below).
 
-## Setup (once Phase 0 lands)
+## Local run
 
 ```bash
-cp .env.example .env   # DATABASE_URL, FDC_API_KEY, API_TOKEN, PORT
-# backend and frontend run instructions land with Phase 0
+cp .env.example .env               # fill in DATABASE_URL and API_TOKEN
+pip install -r backend/requirements.txt
+
+cd backend
+python -m app.migrate              # applies db/food_log_schema.pg.sql + db/migrations/*.sql
+python -m uvicorn app.main:app --reload --port 8000
+
+# verify
+curl localhost:8000/health                                        # 200, public
+curl -H "Authorization: Bearer $API_TOKEN" localhost:8000/api/me  # 200 → user 1
 ```
+
+Tests: `cd backend && python -m pytest`
+
+Migrations are **never** applied on app startup — only via `python -m app.migrate` (the Neon instance is shared with other schemas; see PLAN working agreements).
+
+## Railway deploy
+
+1. New Railway service pointed at this repo (Nixpacks auto-detects Python via root `requirements.txt`; start command and `/health` healthcheck are in `railway.json`).
+2. Set env vars: `DATABASE_URL` (Neon), `API_TOKEN` (generate: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`).
+3. Run the migration once against Neon (locally is fine: `DATABASE_URL=<neon-url> python -m app.migrate` from `backend/`).
+4. Verify: `https://<app>.up.railway.app/health` answers; `/api/me` 401s without the token and 200s with it.
+
+## Phase 0 barcode spike (on-phone test)
+
+Open `https://<app>.up.railway.app/spike/` in Chrome on iOS → share → Add to Home Screen → launch from the home screen (standalone mode is the point of the test) → try **Start ZXing** and **Start html5-qrcode** on a real product barcode. The page shows detections with decode timing, plus any camera errors. Record which library won and any iOS quirks here, then the spike page gets deleted in Phase 4.
