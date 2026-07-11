@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Barcode spike</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="BarcodeSpike">
+<style>
+  /* Throwaway Phase 0 spike — deliberately unstyled beyond usability. */
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px;
+         background: #0d1117; color: #e6e8ee; }
+  h1 { font-size: 1.1rem; }
+  button { font-size: 1rem; padding: 12px 16px; margin: 4px 4px 4px 0; border-radius: 8px;
+           border: 1px solid #444; background: #2f6fe0; color: #fff; min-height: 44px; }
+  button.secondary { background: transparent; }
+  #video { width: 100%; max-height: 50vh; background: #000; border-radius: 8px; }
+  #qr-region { width: 100%; }
+  #results div { padding: 6px 0; border-bottom: 1px solid #333; font-variant-numeric: tabular-nums; }
+  .env { font-size: 0.8rem; color: #9aa1b0; margin-bottom: 8px; }
+  .err { color: #ff7b72; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Phase 0 barcode spike</h1>
+<div class="env" id="env"></div>
+<div>
+  <button id="start-zxing">Start ZXing</button>
+  <button id="start-h5qr">Start html5-qrcode</button>
+  <button id="stop" class="secondary">Stop</button>
+</div>
+<video id="video" playsinline muted hidden></video>
+<div id="qr-region" hidden></div>
+<div class="err" id="error"></div>
+<h2 style="font-size:1rem">Detections</h2>
+<div id="results"></div>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+// Goal: prove camera + continuous 1D barcode decode works from a home-screen
+// (standalone) PWA in iOS WebKit, and pick the winning library. Log timing so
+// we can compare decode latency on real product barcodes.
+const $ = (id) => document.getElementById(id);
+const standalone = window.navigator.standalone === true ||
+  window.matchMedia('(display-mode: standalone)').matches;
+$('env').textContent =
+  `standalone: ${standalone} | mediaDevices: ${!!navigator.mediaDevices} | ${navigator.userAgent}`;
+
+let started = 0;
+let zxingReader = null;
+let h5qr = null;
+
+function logResult(lib, text, format) {
+  const ms = Date.now() - started;
+  const div = document.createElement('div');
+  div.textContent = `[${lib}] ${text} (${format ?? '?'}) — ${ms} ms after start`;
+  $('results').prepend(div);
+  if (navigator.vibrate) navigator.vibrate(100);
+}
+
+function fail(err) { $('error').textContent = String(err?.stack ?? err); }
+
+async function stopAll() {
+  $('error').textContent = '';
+  if (zxingReader) { try { zxingReader.reset(); } catch {} zxingReader = null; }
+  if (h5qr) { try { await h5qr.stop(); } catch {} h5qr = null; }
+  $('video').hidden = true;
+  $('qr-region').hidden = true;
+}
+
+$('start-zxing').onclick = async () => {
+  await stopAll();
+  started = Date.now();
+  $('video').hidden = false;
+  try {
+    zxingReader = new ZXing.BrowserMultiFormatReader();
+    // undefined deviceId + facingMode constraint = back camera on iOS
+    await zxingReader.decodeFromConstraints(
+      { video: { facingMode: 'environment' } },
+      $('video'),
+      (result, err) => { if (result) logResult('zxing', result.getText(), result.getBarcodeFormat()); }
+    );
+  } catch (e) { fail(e); }
+};
+
+$('start-h5qr').onclick = async () => {
+  await stopAll();
+  started = Date.now();
+  $('qr-region').hidden = false;
+  try {
+    h5qr = new Html5Qrcode('qr-region');
+    await h5qr.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 280, height: 160 } },
+      (text, result) => logResult('h5qr', text, result?.result?.format?.formatName),
+      () => {} // per-frame decode misses are expected; stay quiet
+    );
+  } catch (e) { fail(e); }
+};
+
+$('stop').onclick = stopAll;
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "Barcode spike",
+  "short_name": "BarcodeSpike",
+  "start_url": "/spike/",
+  "scope": "/spike/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117"
+}
