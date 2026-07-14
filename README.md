@@ -37,8 +37,12 @@ Migrations are **never** applied on app startup — only via `python -m app.migr
 
 1. New Railway service pointed at this repo (Nixpacks auto-detects Python via root `requirements.txt`; start command and `/health` healthcheck are in `railway.json`).
 2. Set env vars: `DATABASE_URL` (Neon), `API_TOKEN` (generate: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`).
-3. Run the migration once against Neon (locally is fine: `DATABASE_URL=<neon-url> python -m app.migrate` from `backend/`).
-4. Verify: `https://<app>.up.railway.app/health` answers; `/api/me` 401s without the token and 200s with it.
+3. Run the migration once against Neon. Easiest is the **Railway service Console** (a shell inside the running container, with `DATABASE_URL` already injected and Neon reachable):
+   ```
+   cd backend && /opt/venv/bin/python -m app.migrate
+   ```
+   Use the venv's Python (`/opt/venv/bin/python`), not bare `python` — Nixpacks installs deps into the venv, and the interactive console's default `python` is the base Nix interpreter without `asyncpg`. Expect `applied food_log_schema.pg.sql` (re-runs print `migrations: up to date`). Running it locally against the Neon URL works too.
+4. Verify: `https://<app>.up.railway.app/health` answers with `"db":"configured"`; `/api/me` 401s without the token and 200s with it.
 
 ## Phase 0 barcode spike (on-phone test)
 
