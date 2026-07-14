@@ -12,7 +12,8 @@ Self-hosted food logging app replacing MacroFactor's logging and readouts. Perso
 
 ## Status
 
-Phase 0 built (scaffold, schema, migrate, auth perimeter, barcode spike page). Remaining Phase 0 "done when" items are operator steps: Railway deploy + the on-phone barcode spike test (below).
+- **Phase 0 complete** — deployed on Railway, schema migrated into Neon, barcode spike passed on-phone (**ZXing wins**; html5-qrcode dropped — see PLAN spike outcome).
+- **Phase 1 built** — food data layer (bulk FDC import, FDC API import, OFF barcode chain). Awaiting the real bulk data load (below).
 
 ## Local run
 
@@ -46,4 +47,27 @@ Migrations are **never** applied on app startup — only via `python -m app.migr
 
 ## Phase 0 barcode spike (on-phone test)
 
-Open `https://<app>.up.railway.app/spike/` in Chrome on iOS → share → Add to Home Screen → launch from the home screen (standalone mode is the point of the test) → try **Start ZXing** and **Start html5-qrcode** on a real product barcode. The page shows detections with decode timing, plus any camera errors. Record which library won and any iOS quirks here, then the spike page gets deleted in Phase 4.
+**Result (July 2026, iOS 18.7):** camera + continuous decode works from a home-screen standalone PWA. ZXing read UPC-A/EAN-13/EAN-8 accurately; html5-qrcode got no 1D reads and is dropped. Friction is aiming, not decode — Phase 4 ships a reticle, tap-to-focus, and torch toggle. The `/spike/` page gets deleted in Phase 4.
+
+## Phase 1: loading the food catalog
+
+**Bulk import (~15k generic foods, no API key).** From the Railway service Console:
+
+```bash
+cd backend
+curl -LO https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_foundation_food_csv_2025-04-24.zip
+curl -LO https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_csv_2018-04.zip
+/opt/venv/bin/python import/fdc_bulk.py --zip FoodData_Central_foundation_food_csv_2025-04-24.zip --zip FoodData_Central_sr_legacy_food_csv_2018-04.zip
+```
+
+(If a URL 404s, grab the current CSV links from https://fdc.nal.usda.gov/download-datasets — "Foundation Foods" and "SR Legacy".) Re-running is a safe idempotent refresh.
+
+**On-demand imports** (need `FDC_API_KEY` set):
+
+```bash
+/opt/venv/bin/python import/fdc_import.py --search "greek yogurt"          # list FDC hits
+/opt/venv/bin/python import/fdc_import.py --fdc-id 173410                  # import one
+/opt/venv/bin/python import/off_lookup.py --barcode 070734000034           # local → OFF → FDC branded, caches hit
+```
+
+Nutrition is stored per-100g; every nutrient the source reports is kept (snake_case keys like `magnesium_mg`). Canonical keys the app depends on: `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fiber_g`, `sodium_mg`.
