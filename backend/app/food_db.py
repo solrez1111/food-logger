@@ -57,6 +57,28 @@ async def upsert_food(conn: asyncpg.Connection, item: dict, keep_raw: bool = Tru
     return food_id
 
 
+# Keys shown on search cards and per-entry previews (sodium is target-tier,
+# PLAN decision 8).
+PREVIEW_KEYS = ("kcal", "protein_g", "carbs_g", "fat_g", "sodium_mg")
+
+
+async def macro_previews(
+    conn: asyncpg.Connection, food_ids: list[int], keys: tuple[str, ...] = PREVIEW_KEYS
+) -> dict[int, dict[str, float]]:
+    """{food_id: {nutrient_key: amount_per_100g}} for the requested keys."""
+    if not food_ids:
+        return {}
+    rows = await conn.fetch(
+        """SELECT food_id, nutrient_key, amount_per_100g::float AS amount
+           FROM food_log.nutrients WHERE food_id = ANY($1) AND nutrient_key = ANY($2)""",
+        food_ids, list(keys),
+    )
+    out: dict[int, dict[str, float]] = {fid: {} for fid in food_ids}
+    for r in rows:
+        out[r["food_id"]][r["nutrient_key"]] = r["amount"]
+    return out
+
+
 async def find_by_barcode(conn: asyncpg.Connection, code: str) -> asyncpg.Record | None:
     variants = barcode_variants(code)
     if not variants:

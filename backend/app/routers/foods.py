@@ -23,8 +23,6 @@ from ..normalize import fdc_api_food
 
 router = APIRouter(prefix="/api/foods", dependencies=[Depends(get_current_user)])
 
-PREVIEW_KEYS = ("kcal", "protein_g", "carbs_g", "fat_g", "sodium_mg")
-
 SEARCH_FTS = """
 SELECT f.id, f.source, f.name, f.brand, f.barcode,
        ts_rank(f.search_vec, q)::float AS score
@@ -42,20 +40,6 @@ WHERE word_similarity($1, f.name) > 0.4
 ORDER BY score DESC, length(f.name) ASC
 LIMIT $2
 """
-
-
-async def _macro_previews(conn: asyncpg.Connection, food_ids: list[int]) -> dict[int, dict]:
-    if not food_ids:
-        return {}
-    rows = await conn.fetch(
-        """SELECT food_id, nutrient_key, amount_per_100g::float AS amount
-           FROM food_log.nutrients WHERE food_id = ANY($1) AND nutrient_key = ANY($2)""",
-        food_ids, list(PREVIEW_KEYS),
-    )
-    out: dict[int, dict] = {fid: {} for fid in food_ids}
-    for r in rows:
-        out[r["food_id"]][r["nutrient_key"]] = r["amount"]
-    return out
 
 
 async def _local_search(conn: asyncpg.Connection, q: str, limit: int):
@@ -98,7 +82,7 @@ async def search_foods(
                 await food_db.upsert_food(conn, item)
 
     rows, matched = await _local_search(conn, q, limit)
-    macros = await _macro_previews(conn, [r["id"] for r in rows])
+    macros = await food_db.macro_previews(conn, [r["id"] for r in rows])
     results = [_result(r, macros) for r in rows]
     return {
         "query": q,
