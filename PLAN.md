@@ -113,6 +113,8 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 - `GET/POST/DELETE /favorites` — food + usual amount; `POST /log` accepts a favorite_id shorthand.
 - **Done when:** full log-a-day flow works via authed curl; replaying the same POST (same client_id) doesn't duplicate; rollup and coverage math verified by tests.
 
+- **✅ BUILT (July 2026):** all endpoints live behind the bearer perimeter. Coverage math pinned by tests (sodium coverage 2/3 with a non-reporting food in the mix; unreported nutrients return null + 0.0 coverage, never fake zeros). client_id replay verified idempotent; portion→grams conversion server-side; favorites log in one tap with entry_method='favorite'; targets versioned by effective_date with remaining computed in the day summary. Full log-a-day flow driven via authed curl locally. 58 tests green.
+
 ### Phase 4 — PWA frontend (logging-first, thumb-friendly)
 This is the whole reason the project exists — MacroFactor's readout is bad; mine must be fast and legible.
 - **First-run screen:** paste API token once; stored locally.

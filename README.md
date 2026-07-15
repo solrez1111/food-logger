@@ -15,6 +15,9 @@ Self-hosted food logging app replacing MacroFactor's logging and readouts. Perso
 - **Phase 0 complete** — deployed on Railway, schema migrated into Neon, barcode spike passed on-phone (**ZXing wins**; html5-qrcode dropped — see PLAN spike outcome).
 - **Phase 1 complete** — 8,204 foods (FDC Foundation + SR Legacy) loaded into Neon with per-100g nutrition, portions, and search indexes.
 - **Phase 2 built** — search & matching API: `GET /api/foods/search` (FTS + trigram typo fallback, `remote=1` for explicit USDA import), `GET /api/foods/barcode/{code}` (local → OFF → FDC chain), `GET /api/foods/{id}`, `POST /api/foods` (custom foods).
+- **Phase 3 built** — logging API: `POST/GET/PATCH/DELETE /api/log` (client-local dates, grams-or-portion input, client_id idempotency), `GET /api/summary/{date}` and `?start=&end=` (macro+sodium rollups with coverage, target remaining), `GET /api/summary/nutrient/{key}` (any stored nutrient), `POST/GET /api/weight`, `PUT/GET /api/targets` (effective-date versioned), `POST/GET/DELETE /api/favorites` (one-tap logging via `favorite_id`).
+
+**Outstanding operator steps:** run migration 0002 in the Railway console (`cd backend && /opt/venv/bin/python -m app.migrate`), then the Phase 2 prod smoke (search + one barcode lookup).
 
 ## Local run
 
