@@ -102,6 +102,8 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 - `POST /foods` → custom food creation.
 - **Done when:** "greek yogurt" returns sane ranked results fast from the bulk-imported set; "yogrt" still finds yogurt; an unknown barcode gets fetched, cached, and returned; remote search only fires when asked.
 
+- **✅ BUILT (July 2026):** all four endpoints live behind the bearer perimeter, with per-result macro previews (kcal/protein/carbs/fat/sodium per 100g) and an `offer_remote` flag when local results are weak. Verified: FTS ranking, trigram typo rescue ('brocoli' → 'Broccoli, raw'), UPC-A↔EAN-13 barcode variant matching, custom-food validation. 44 tests green. Remaining for DONE: prod smoke against the full 8,204-food catalog + one unknown-barcode fetch through OFF (operator console).
+
 ### Phase 3 — Logging API
 - `POST /log` (client_id, user implied by token via `get_current_user`, client-local date, food_id, grams OR portion_id+qty — server converts to canonical grams; idempotent on client_id), `GET /log/{date}`, `PATCH /log/{id}`, `DELETE /log/{id}`.
 - `GET /summary/{date}` and `GET /summary?start=&end=` → daily rollups (kcal, protein, carbs, fat, fiber, **sodium_mg with its coverage figure** — sodium is target-tier, decision 8).

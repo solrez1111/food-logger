@@ -13,7 +13,8 @@ Self-hosted food logging app replacing MacroFactor's logging and readouts. Perso
 ## Status
 
 - **Phase 0 complete** — deployed on Railway, schema migrated into Neon, barcode spike passed on-phone (**ZXing wins**; html5-qrcode dropped — see PLAN spike outcome).
-- **Phase 1 built** — food data layer (bulk FDC import, FDC API import, OFF barcode chain). Awaiting the real bulk data load (below).
+- **Phase 1 complete** — 8,204 foods (FDC Foundation + SR Legacy) loaded into Neon with per-100g nutrition, portions, and search indexes.
+- **Phase 2 built** — search & matching API: `GET /api/foods/search` (FTS + trigram typo fallback, `remote=1` for explicit USDA import), `GET /api/foods/barcode/{code}` (local → OFF → FDC chain), `GET /api/foods/{id}`, `POST /api/foods` (custom foods).
 
 ## Local run
 
