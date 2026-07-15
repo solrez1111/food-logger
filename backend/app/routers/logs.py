@@ -130,6 +130,43 @@ async def create_log(
     return await _entry_out(conn, existing)
 
 
+# NOTE: declared before /log/{day} so the literal path wins over date parsing.
+@router.get("/log/recent")
+async def recent_foods(
+    user: dict = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Distinct recently-logged foods with their last-used amount — the log
+    screen's primary interaction (PLAN decision 10: recents beat search)."""
+    rows = await conn.fetch(
+        """SELECT t.food_id, f.name, f.brand, t.grams, t.portion_id, t.portion_qty,
+                  p.description AS portion_description, t.logged_at
+           FROM (
+             SELECT DISTINCT ON (e.food_id)
+                    e.food_id, e.grams::float AS grams, e.portion_id,
+                    e.portion_qty::float AS portion_qty, e.logged_at
+             FROM food_log.log_entries e
+             WHERE e.user_id = $1 AND e.logged_at > now() - interval '60 days'
+             ORDER BY e.food_id, e.logged_at DESC
+           ) t
+           JOIN food_log.foods f ON f.id = t.food_id
+           LEFT JOIN food_log.portions p ON p.id = t.portion_id
+           ORDER BY t.logged_at DESC
+           LIMIT 20""",
+        user["id"],
+    )
+    macros = await food_db.macro_previews(conn, [r["food_id"] for r in rows])
+    return {"recent": [
+        {
+            "food_id": r["food_id"], "name": r["name"], "brand": r["brand"],
+            "last_grams": r["grams"], "last_portion_id": r["portion_id"],
+            "last_portion_qty": r["portion_qty"],
+            "last_portion_description": r["portion_description"],
+            "per_100g": macros.get(r["food_id"], {}),
+        } for r in rows
+    ]}
+
+
 @router.get("/log/{day}")
 async def get_log_day(
     day: Date,
