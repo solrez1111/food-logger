@@ -71,4 +71,4 @@ curl -LO https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_c
 /opt/venv/bin/python import/off_lookup.py --barcode 070734000034           # local → OFF → FDC branded, caches hit
 ```
 
-Nutrition is stored per-100g; every nutrient the source reports is kept (snake_case keys like `magnesium_mg`). Canonical keys the app depends on: `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fiber_g`, `sodium_mg`.
+Nutrition is stored per-100g; every nutrient the source reports is kept (snake_case keys). Keys are canonical **across sources** (an FDC food and an OFF food both store `potassium_mg` — see `FDC_CANONICAL` in `app/normalize.py`; migration 0002 renamed pre-existing rows). Macro keys the app's rollups depend on: `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fiber_g`, `sodium_mg`. Also canonical: potassium, magnesium, calcium and the other DASH-relevant minerals, cholesterol, saturated/trans fat, sugars, caffeine, and `alcohol_g` (dashboard cutover compatibility).

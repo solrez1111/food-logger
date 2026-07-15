@@ -60,8 +60,35 @@ def test_energy_atwater_fallback_order():
 
 
 def test_unknown_nutrient_gets_slugged_key():
-    out = finalize_fdc_nutrients([row("304", 11, name="Magnesium, Mg", unit="MG")])
-    assert out == {"magnesium_mg_mg": 11}
+    out = finalize_fdc_nutrients([row("337", 3.2, name="Lycopene", unit="UG")])
+    assert out == {"lycopene_ug": 3.2}
+
+
+def test_minerals_map_to_canonical_keys_not_element_slugs():
+    out = finalize_fdc_nutrients([
+        row("306", 316, name="Potassium, K", unit="MG"),
+        row("304", 11, name="Magnesium, Mg", unit="MG"),
+        row("221", 0.5, name="Alcohol, ethyl", unit="G"),
+    ])
+    assert out == {"potassium_mg": 316, "magnesium_mg": 11, "alcohol_g": 0.5}
+
+
+def test_fdc_and_off_agree_on_keys_for_shared_nutrients():
+    # The whole point of FDC_CANONICAL: one key per nutrient across sources.
+    fdc = finalize_fdc_nutrients([
+        row("306", 316, name="Potassium, K", unit="MG"),
+        row("304", 11, name="Magnesium, Mg", unit="MG"),
+        row("301", 110, name="Calcium, Ca", unit="MG"),
+        row("601", 5, name="Cholesterol", unit="MG"),
+        row("606", 0.2, name="Fatty acids, total saturated", unit="G"),
+    ])
+    off = off_nutrients({
+        "potassium_100g": 0.316, "magnesium_100g": 0.011, "calcium_100g": 0.110,
+        "cholesterol_100g": 0.005, "saturated-fat_100g": 0.2,
+    })
+    assert set(fdc) == set(off)
+    for key in fdc:
+        assert fdc[key] == pytest.approx(off[key], rel=1e-6), key
 
 
 def test_string_amounts_and_junk_are_tolerated():

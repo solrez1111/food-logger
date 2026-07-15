@@ -31,7 +31,7 @@ def test_load_dir_nutrients_with_energy_precedence():
     assert yogurt["kcal"] == 59
     assert yogurt["protein_g"] == 10.19
     assert yogurt["sodium_mg"] == 36
-    assert yogurt["magnesium_mg_mg"] == 11  # non-canonical -> slugged
+    assert yogurt["magnesium_mg"] == 11  # canonical cross-source key, not magnesium_mg_mg
 
     broccoli = items["747997"]["nutrients"]
     # only kJ present -> derived kcal

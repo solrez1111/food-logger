@@ -22,12 +22,43 @@ KJ_PER_KCAL = 4.184
 
 # FDC nutrient numbers -> canonical keys. Energy has its own precedence logic
 # below (208 direct kcal > 957/958 Atwater > derived from 268 kJ).
+#
+# The mineral/vitamin entries exist for CROSS-SOURCE consistency: FDC names
+# carry element symbols ("Potassium, K") which auto-slug to potassium_k_mg,
+# while OFF imports produce potassium_mg — same nutrient, two keys, silently
+# split totals. One canonical key per nutrient, whatever the source.
+# (Data loaded before this map existed is renamed by migration 0002.)
 FDC_CANONICAL = {
     "203": "protein_g",
     "204": "fat_g",
     "205": "carbs_g",
     "291": "fiber_g",
     "307": "sodium_mg",
+    # minerals
+    "301": "calcium_mg",
+    "303": "iron_mg",
+    "304": "magnesium_mg",
+    "305": "phosphorus_mg",
+    "306": "potassium_mg",
+    "309": "zinc_mg",
+    "312": "copper_mg",
+    "315": "manganese_mg",
+    "317": "selenium_ug",
+    # vitamins
+    "320": "vitamin_a_ug",
+    "323": "vitamin_e_mg",
+    "328": "vitamin_d_ug",
+    "401": "vitamin_c_mg",
+    "418": "vitamin_b_12_ug",
+    # lipids / sugars / stimulants
+    "601": "cholesterol_mg",
+    "605": "fatty_acids_total_trans_g",
+    "606": "fatty_acids_total_saturated_g",
+    "269": "sugars_total_g",
+    "539": "sugars_added_g",
+    "262": "caffeine_mg",
+    # dashboard compatibility: nutrition_days.alcohol_g reads this key (Phase 7)
+    "221": "alcohol_g",
 }
 FDC_ENERGY_KCAL = "208"
 FDC_ENERGY_KJ = "268"
