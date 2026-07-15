@@ -93,6 +93,8 @@ Idempotency rule (mirrors my dashboard's hard-won convention): every upsert keye
 - When FDC/OFF data is ambiguous (serving sizes especially), normalize conservatively, keep the raw JSON, and flag oddities in comments rather than guessing silently.
 - **Done when:** bulk import populates ~15k foods with correct per-100g rows; one command with a barcode or search term produces correct rows. Unit tests cover nutrient normalization edge cases (kJ→kcal, serving-basis vs 100g-basis, label rounding).
 
+- **✅ COMPLETE (July 2026):** bulk import loaded **8,204 foods** into Neon (411 Foundation + 7,793 SR Legacy — the "~15k" estimate was high; Foundation is a small curated set). Per-100g nutrients, portions, FTS/trigram indexes all populated. 36 unit/integration tests green (kJ→kcal precedence, salt→sodium, serving-basis, barcode variants, idempotent upsert). Importers: `fdc_bulk.py` (CSV), `fdc_import.py` (API), `off_lookup.py` (barcode chain). Phase 1 DONE.
+
 ### Phase 2 — Search & matching API
 - `GET /foods/search?q=` → local FTS ranked by `ts_rank`, trigram fallback when FTS returns nothing. (Verified on PG16 in Phase 0: rank the fallback by `word_similarity(q, name)` with a ~0.4 cutoff — the `<%` operator's default 0.6 threshold misses obvious typos: 'yogrt' vs 'Greek Yogurt Plain' scores 0.5.) **No implicit live-FDC fallthrough** — response includes a flag the UI uses to offer explicit "Search USDA →" (`GET /foods/search?q=&remote=1`), which imports hits on the fly.
 - `GET /foods/barcode/{code}` → resolution chain from Phase 1.
