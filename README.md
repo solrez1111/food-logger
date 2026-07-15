@@ -16,6 +16,7 @@ Self-hosted food logging app replacing MacroFactor's logging and readouts. Perso
 - **Phase 1 complete** — 8,204 foods (FDC Foundation + SR Legacy) loaded into Neon with per-100g nutrition, portions, and search indexes.
 - **Phase 2 built** — search & matching API: `GET /api/foods/search` (FTS + trigram typo fallback, `remote=1` for explicit USDA import), `GET /api/foods/barcode/{code}` (local → OFF → FDC chain), `GET /api/foods/{id}`, `POST /api/foods` (custom foods).
 - **Phase 3 built** — logging API: `POST/GET/PATCH/DELETE /api/log` (client-local dates, grams-or-portion input, client_id idempotency), `GET /api/summary/{date}` and `?start=&end=` (macro+sodium rollups with coverage, target remaining), `GET /api/summary/nutrient/{key}` (any stored nutrient), `POST/GET /api/weight`, `PUT/GET /api/targets` (effective-date versioned), `POST/GET/DELETE /api/favorites` (one-tap logging via `favorite_id`).
+- **Phase 4 built** — installable PWA (`frontend/`, Vite+React, served by FastAPI in prod): token setup screen; log screen ordered camera-placeholder → favorite chips → recents → local search → ZXing barcode scanner (reticle/torch/haptics) → "Search USDA"; portion-first amount sheet with grams toggle, live kcal/protein/sodium preview, save-as-favorite; day view with remaining kcal+sodium leading and per-entry edit/delete; trends (kcal/protein bars, weight with 7-day smoothing, any-nutrient panel with coverage-shaded bars); service worker shell cache + IndexedDB outbox (flush on open/foreground/online). The `/spike/` page is gone.
 
 **Outstanding operator steps:** run migration 0002 in the Railway console (`cd backend && /opt/venv/bin/python -m app.migrate`), then the Phase 2 prod smoke (search + one barcode lookup).
 
@@ -29,10 +30,15 @@ cd backend
 python -m app.migrate              # applies db/food_log_schema.pg.sql + db/migrations/*.sql
 python -m uvicorn app.main:app --reload --port 8000
 
-# verify
+# frontend dev server (separate terminal; proxies /api → :8000)
+cd frontend && npm install && npm run dev    # http://localhost:5173
+
+# verify API
 curl localhost:8000/health                                        # 200, public
 curl -H "Authorization: Bearer $API_TOKEN" localhost:8000/api/me  # 200 → user 1
 ```
+
+Production build: `cd frontend && npm run build` — FastAPI then serves `frontend/dist/` with an SPA fallback (Railway does this via `nixpacks.toml`).
 
 Tests: `cd backend && python -m pytest`
 

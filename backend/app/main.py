@@ -2,7 +2,8 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .auth import get_current_user
@@ -47,7 +48,17 @@ async def me(user: dict = Depends(get_current_user)):
     return {"user": user}
 
 
-# Phase 0 barcode spike — throwaway page, removed in Phase 4. Public by design:
-# it makes no API calls; it only exercises camera + decode on iOS WebKit.
-_spike_dir = Path(__file__).parent / "static" / "spike"
-app.mount("/spike", StaticFiles(directory=_spike_dir, html=True), name="spike")
+# Serve the built PWA (frontend/dist). API routes are registered above and
+# win; anything else falls back to index.html so the app owns its URL space.
+_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if _dist.is_dir():
+    app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="not found")
+        candidate = _dist / path
+        if path and candidate.is_file() and candidate.resolve().is_relative_to(_dist):
+            return FileResponse(candidate)
+        return FileResponse(_dist / "index.html")
