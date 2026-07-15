@@ -73,6 +73,9 @@ async def resolve_barcode(conn: asyncpg.Connection, client: httpx.AsyncClient, c
                 return await food_db.food_detail(conn, food_id)
 
     # FDC branded search matches gtinUpc via the plain query string.
+    # Skipped gracefully when no API key is configured — OFF alone still works.
+    if not os.environ.get("FDC_API_KEY"):
+        return None
     for variant in barcode_variants(code):
         hits = await fdc_search(client, variant, data_types=["Branded"], page_size=3)
         for payload in hits:

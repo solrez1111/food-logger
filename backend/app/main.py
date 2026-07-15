@@ -1,14 +1,26 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .auth import get_current_user
+from .db import close_pool, init_pool
+from .routers.foods import router as foods_router
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
-app = FastAPI(title="food-logger", version=VERSION)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await init_pool()
+    yield
+    await close_pool()
+
+
+app = FastAPI(title="food-logger", version=VERSION, lifespan=lifespan)
+app.include_router(foods_router)
 
 
 # Public health endpoint — used by the Railway healthcheck. Always 200; reports
