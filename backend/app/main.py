@@ -9,11 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from .auth import get_current_user
 from .db import close_pool, init_pool
 from .routers.body import router as body_router
+from .routers.estimate import router as estimate_router
 from .routers.foods import router as foods_router
 from .routers.logs import router as logs_router
 from .routers.summary import router as summary_router
 
-VERSION = "0.3.0"
+VERSION = "0.5.0"
 
 
 @asynccontextmanager
@@ -25,6 +26,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="food-logger", version=VERSION, lifespan=lifespan)
 app.include_router(foods_router)
+app.include_router(estimate_router)   # /api/log/estimate — before logs' /api/log/{...} routes
 app.include_router(logs_router)
 app.include_router(summary_router)
 app.include_router(body_router)
