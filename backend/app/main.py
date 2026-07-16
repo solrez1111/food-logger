@@ -1,5 +1,5 @@
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -17,14 +17,52 @@ from .routers.summary import router as summary_router
 VERSION = "0.5.0"
 
 
+# Remote MCP (Phase 6): mounted at /mcp/{API_TOKEN} for claude.ai custom
+# connectors. The unguessable path is the perimeter — same secret as the
+# bearer token, so the URL must be treated like a password (OAuth is 6b).
+_mcp_token = os.environ.get("API_TOKEN", "")
+_mcp = None
+if _mcp_token:
+    from .mcp_server import build_mcp
+    _mcp = build_mcp()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await init_pool()
-    yield
-    await close_pool()
+    try:
+        async with AsyncExitStack() as stack:
+            if _mcp is not None:
+                try:
+                    await stack.enter_async_context(_mcp.session_manager.run())
+                except RuntimeError:
+                    # A session manager only runs once per process. In prod the
+                    # lifespan runs once so this never fires; under pytest each
+                    # module re-enters the lifespan — /mcp is inert there, the
+                    # API is unaffected.
+                    pass
+            yield
+    finally:
+        await close_pool()
 
 
 app = FastAPI(title="food-logger", version=VERSION, lifespan=lifespan)
+if _mcp is not None:
+    _mcp_prefix = f"/mcp/{_mcp_token}"
+    app.mount(_mcp_prefix, _mcp.streamable_http_app())
+
+    class _McpTrailingSlash:
+        """The mounted MCP app answers at '<prefix>/'; users paste the URL
+        without the slash. Rewrite so both forms reach it."""
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http" and scope.get("path") == _mcp_prefix:
+                scope = {**scope, "path": _mcp_prefix + "/"}
+            await self.inner(scope, receive, send)
+
+    app.add_middleware(_McpTrailingSlash)
 app.include_router(foods_router)
 app.include_router(estimate_router)   # /api/log/estimate — before logs' /api/log/{...} routes
 app.include_router(logs_router)
