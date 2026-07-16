@@ -14,7 +14,7 @@ from .routers.foods import router as foods_router
 from .routers.logs import router as logs_router
 from .routers.summary import router as summary_router
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 
 # Remote MCP (Phase 6): mounted at /mcp/{API_TOKEN} for claude.ai custom
