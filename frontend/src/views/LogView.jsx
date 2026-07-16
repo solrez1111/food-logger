@@ -127,7 +127,10 @@ export default function LogView({ queued, onLogged, onAuthLost }) {
 
       {results && (
         <div className="card">
-          <h2>{searching ? 'Searching…' : `Results ${results.matched === 'trgm' ? '(fuzzy match)' : ''}`}</h2>
+          <h2>{searching ? 'Searching…' : `Results ${
+            results.matched === 'trgm' ? '(fuzzy match)'
+            : results.matched === 'fts_partial' ? '(no exact match — closest)'
+            : ''}`}</h2>
           {results.results.map((r) => (
             <button key={r.id} className="food-row" onClick={() => setPicked({ food: r, defaultAmount: null })}>
               <span>
