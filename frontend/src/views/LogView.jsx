@@ -1,8 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { localToday } from '../dates.js'
+import EstimateSheet from '../components/EstimateSheet.jsx'
 import FoodSheet from '../components/FoodSheet.jsx'
 import Scanner from '../components/Scanner.jsx'
+
+/* Downscale the iPhone photo (HEIC originals are huge) to a ≤1024px JPEG via
+   canvas re-encode — fast round trip, cheap vision call. Returns bare base64. */
+async function downscale(file, maxDim = 1024) {
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close?.()
+  return canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
+}
 
 const kcal100 = (f) => f.per_100g?.kcal != null ? `${Math.round(f.per_100g.kcal)} kcal/100g` : ''
 
@@ -16,9 +30,13 @@ export default function LogView({ queued, onLogged, onAuthLost }) {
   const [searching, setSearching] = useState(false)
   const [picked, setPicked] = useState(null)     // {food, defaultAmount}
   const [scanning, setScanning] = useState(false)
+  const [estimating, setEstimating] = useState(null)  // {image_b64?, text?}
+  const [describing, setDescribing] = useState(false)
+  const [describeText, setDescribeText] = useState('')
   const [flash, setFlash] = useState(null)       // {text, tone}
   const [error, setError] = useState(null)
   const debounceRef = useRef(null)
+  const cameraRef = useRef(null)
 
   const loadLists = () => {
     api('/api/favorites').then((d) => setFavorites(d.favorites)).catch(bail)
@@ -98,8 +116,24 @@ export default function LogView({ queued, onLogged, onAuthLost }) {
       {flash && <div className="card" style={{ borderColor: 'var(--green)', color: 'var(--green)' }}>{flash}</div>}
       {error && <div className="error" onClick={() => setError(null)}>{error} (tap to dismiss)</div>}
 
-      <button className="camera-btn" onClick={() => showFlash('Photo logging arrives in Phase 5')}>
+      <button className="camera-btn" style={{ borderStyle: 'solid', color: 'var(--text)' }}
+              onClick={() => cameraRef.current?.click()}>
         <span className="glyph">📷</span> Estimate my plate
+      </button>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden
+             onChange={async (e) => {
+               const file = e.target.files?.[0]
+               e.target.value = ''
+               if (!file) return
+               try {
+                 setEstimating({ image_b64: await downscale(file) })
+               } catch (err) {
+                 setError(`Could not read the photo: ${err.message}`)
+               }
+             }} />
+      <button className="btn secondary" style={{ marginBottom: 12, minHeight: 42 }}
+              onClick={() => setDescribing(true)}>
+        …or describe the meal instead
       </button>
 
       {favorites.length > 0 && (
@@ -189,6 +223,39 @@ export default function LogView({ queued, onLogged, onAuthLost }) {
         />
       )}
       {scanning && <Scanner onCode={onScanCode} onClose={() => setScanning(false)} />}
+
+      {describing && (
+        <div className="sheet-backdrop" onClick={() => setDescribing(false)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <b>Describe the meal</b>
+            <p className="faint">e.g. "two fried eggs, half a cup of white rice, a handful of steamed broccoli"</p>
+            <textarea
+              className="input" rows={3} style={{ padding: 12, resize: 'none' }}
+              value={describeText} onChange={(e) => setDescribeText(e.target.value)} autoFocus
+            />
+            <button className="btn" style={{ marginTop: 10 }} disabled={!describeText.trim()}
+                    onClick={() => { setDescribing(false); setEstimating({ text: describeText.trim() }) }}>
+              Estimate
+            </button>
+          </div>
+        </div>
+      )}
+
+      {estimating && (
+        <EstimateSheet
+          payload={estimating}
+          onClose={() => setEstimating(null)}
+          onLogged={({ count, queued }) => {
+            setEstimating(null)
+            setDescribeText('')
+            showFlash(queued > 0
+              ? `${count} items — ${queued} queued offline, will sync`
+              : `Logged ${count} item${count === 1 ? '' : 's'} ✓`)
+            onLogged()
+            loadLists()
+          }}
+        />
+      )}
     </div>
   )
 }

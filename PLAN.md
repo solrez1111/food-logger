@@ -137,6 +137,8 @@ This is the whole reason the project exists — MacroFactor's readout is bad; mi
 - Server-side only (`ANTHROPIC_API_KEY` in Railway env — add to `.env.example`); use a fast vision-capable model (Haiku-class) — this runs at mealtimes and must feel instant. Photos are processed for estimation, not stored (no image persistence in v1).
 - **Done when:** photographing a real dinner from the home-screen PWA produces sensible matched foods + gram estimates I can adjust and confirm faster than manual entry; the text path works when no photo exists; estimation failures degrade gracefully to manual search.
 
+- **✅ BUILT (July 2026):** POST /api/log/estimate (photo and/or text → Claude Haiku vision via forced tool-use → candidates matched through app.search against the local catalog; nutrition only ever from the catalog). Camera button wired via native photo input with client-side ≤1024px JPEG re-encode; describe-instead sheet; confirm-before-save EstimateSheet with per-row grams adjusters, alternative-match dropdowns, inline manual search for unmatched rows, live kcal/protein/sodium totals, skip/include toggles; entries tagged ai_photo/ai_text; offline confirm falls into the outbox. Photos not persisted. 69 backend tests (Claude call mocked); full photo→confirm→day-view flow driven in headless Chromium, zero JS errors. Remaining for DONE: real-dinner photo on the phone with ANTHROPIC_API_KEY set (operator).
+
 ### Phase 6 — MCP server (stdio first)
 - `mcp/` exposes: search_foods, log_food, estimate_plate, get_day_summary, get_trends, get_nutrient_summary, log_weight — thin wrappers over the API using the bearer token.
 - **6a: stdio mode** for Claude Code — trivial, ship first.
